@@ -7,32 +7,40 @@ import threading
 from pystray import Icon, MenuItem, Menu
 from PIL import Image
 from filelock import FileLock
-from frontend import App 
 import tkinter as tk
 from datetime import datetime
+from frontend import App, load_config, TEXTS
 
-lock_path = os.path.join(os.environ['APPDATA'], 'GameWatcher', 'game_watcher.lock')
-lock = FileLock(lock_path, timeout=1)
+# パス設定
+APPDATA_DIR = os.path.join(os.environ['APPDATA'], 'GameWatcher')
+if not os.path.exists(APPDATA_DIR):
+    os.makedirs(APPDATA_DIR)
 
+LOCK_PATH = os.path.join(APPDATA_DIR, 'game_watcher.lock')
+BACKEND_LOCK = os.path.join(APPDATA_DIR, "backend.lock")
+
+# バックグラウンドプロセス判定
 if len(sys.argv) > 1 and sys.argv[1] == "--backend":
     from backend import main as run_backend
     run_backend()
     sys.exit()
 
+# 多重起動防止
+lock = FileLock(LOCK_PATH, timeout=1)
 try:
     lock.acquire()
 except:
     sys.exit()
 
-appdata_dir = os.path.join(os.environ['APPDATA'], 'GameWatcher')
-if not os.path.exists(appdata_dir):
-    os.makedirs(appdata_dir)
-LOCK_FILE = os.path.join(appdata_dir, "backend.lock")
+# 関数定義
+def get_resource_path(relative_path):
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
 
 def start_backend():
-    if os.path.exists(LOCK_FILE):
+    if os.path.exists(BACKEND_LOCK):
         try:
-            with open(LOCK_FILE, "r") as f:
+            with open(BACKEND_LOCK, "r") as f:
                 pid = int(f.read())
             if psutil.pid_exists(pid):
                 return 
@@ -40,11 +48,6 @@ def start_backend():
 
     subprocess.Popen([sys.executable, "--backend"], 
                      creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-
-def open_stats():
-    stats_root = tk.Tk()
-    app = App(stats_root)
-    stats_root.mainloop()
 
 def open_frontend():
     def _create():
@@ -57,37 +60,32 @@ def open_frontend():
     threading.Thread(target=_create, daemon=True).start()
 
 def on_quit(icon, item):
-    if os.path.exists(LOCK_FILE):
-        try:
-            os.remove(LOCK_FILE)
-        except:
-            pass
+    if os.path.exists(BACKEND_LOCK):
+        try: os.remove(BACKEND_LOCK)
+        except: pass
     icon.stop()
     os._exit(0)
 
-# アイコン作成
-image = Image.new('RGB', (64, 64), (40, 40, 40))
-
-icon = Icon("GameWatcher", image, menu=Menu(
-    MenuItem("統計を開く", open_frontend),
-    MenuItem("終了", on_quit)
-))
-
-def get_resource_path(relative_path):
-    """ exe化後の一時フォルダからのパス解決 """
-    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_path, relative_path)
-
-try:
-    icon_image = Image.open(get_resource_path("app_icon.png"))
-except Exception:
-    icon_image = Image.new('RGB', (64, 64), (40, 40, 40))
-
-icon = Icon("GameWatcher", icon_image, menu=Menu(
-    MenuItem("統計を開く", open_frontend),
-    MenuItem("終了", on_quit)
-))
-
+# --- 4. メイン処理 ---
 if __name__ == "__main__":
+    # 設定から言語を取得
+    config = load_config()
+    lang = config.get("language", "ja")
+
+    menu_open_label = "統計を開く" if lang == "ja" else "Open Statistics"
+    menu_quit_label = "終了" if lang == "ja" else "Quit"
+
+    # アイコン画像読み込み
+    try:
+        icon_image = Image.open(get_resource_path("app_icon.png"))
+    except:
+        icon_image = Image.new('RGB', (64, 64), (40, 40, 40))
+
+    # トレイアイコンの設定
+    icon = Icon("GameWatcher", icon_image, menu=Menu(
+        MenuItem(menu_open_label, open_frontend),
+        MenuItem(menu_quit_label, on_quit)
+    ))
+
     start_backend()
     icon.run()
